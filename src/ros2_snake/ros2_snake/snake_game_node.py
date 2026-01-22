@@ -18,6 +18,9 @@ class SnakeGameNode(Node):
         self.direction = (1, 0)  # moving right
         self.food = self.spawn_food()
         self.score = 0
+        self.game_over = False
+        self.win = False
+
         # ROS interfaces
         self.dir_sub = self.create_subscription(
             String,
@@ -44,6 +47,10 @@ class SnakeGameNode(Node):
         )
 
     def direction_callback(self, msg):
+        if msg.data == "RESET":
+            self.reset_game()
+            return
+
         mapping = {
             'UP': (0, -1),
             'DOWN': (0, 1),
@@ -60,12 +67,19 @@ class SnakeGameNode(Node):
         # Prevent reversing direction
         if (new_dir[0] == -current_dir[0] and
             new_dir[1] == -current_dir[1]):
-            return  # illegal move, ignore
+            return
 
         self.direction = new_dir
 
 
+
     def update_game(self):
+        if self.game_over:
+            state = "WIN" if self.win else "LOSE"
+            msg = String()
+            msg.data = f"{self.snake}|{self.food}|{self.score}|{state}"
+            self.state_pub.publish(msg)
+            return
         head_x, head_y = self.snake[0]
         dx, dy = self.direction
         new_head = (head_x + dx, head_y + dy)
@@ -76,10 +90,14 @@ class SnakeGameNode(Node):
             new_head[0] < 0 or new_head[0] >= GRID_WIDTH or
             new_head[1] < 0 or new_head[1] >= GRID_HEIGHT
         ):
-            self.get_logger().info("GAME OVER")
-            rclpy.shutdown()
+            self.get_logger().info("YOU LOST")
+            self.game_over = True
             return
-
+        if self.score >= 200:
+            self.get_logger().info('YOU WON!')
+            self.win = True
+            self.game_over = True
+            return
         self.snake.insert(0, new_head)
 
         if new_head == self.food:
@@ -91,9 +109,18 @@ class SnakeGameNode(Node):
             self.snake.pop()
 
         msg = String()
-        msg.data = f"{self.snake}|{self.food}|{self.score}"
+        state = "PLAYING"
+        msg.data = f"{self.snake}|{self.food}|{self.score}|{state}"
         self.state_pub.publish(msg)
 
+    def reset_game(self):
+        self.snake = [(10, 10), (9, 10), (8, 10)]
+        self.direction = (1, 0)
+        self.food = self.spawn_food()
+        self.score = 0
+        self.game_over = False
+        self.win = False
+        self.get_logger().info("Game restarted")
 
 def main():
     rclpy.init()
