@@ -25,4 +25,4 @@ colcon build
 source install/setup.bash
 ros2 run ros2_snake snake_game
 ros2 run ros2_snake renderer
-#'run renderer first and then snake_game'
+## 'run renderer first and then snake_game'
