@@ -19,10 +19,10 @@ A simple graphical Snake game implemented in **ROS 2 (rclpy)** and **Pygame**, d
 - pygame
 - WSL + X11 (XLaunch)
 
-## Build & Run
+## Build & Run (run renderer first and then snake_game)
 ```bash
 colcon build
 source install/setup.bash
 ros2 run ros2_snake snake_game
 ros2 run ros2_snake renderer
-## 'run renderer first and then snake_game'
+
