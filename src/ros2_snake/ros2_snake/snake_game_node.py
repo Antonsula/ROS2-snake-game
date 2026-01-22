@@ -16,6 +16,7 @@ class SnakeGameNode(Node):
         # Initial snake
         self.snake = [(10, 10), (9, 10), (8, 10)]
         self.direction = (1, 0)  # moving right
+        self.pending_direction = self.direction
         self.food = self.spawn_food()
         self.score = 0
         self.game_over = False
@@ -36,7 +37,7 @@ class SnakeGameNode(Node):
         )
 
         # Game loop timer
-        self.timer = self.create_timer(0.2, self.update_game)
+        self.timer = self.create_timer(0.15, self.update_game)
 
         self.get_logger().info("Snake game node started")
 
@@ -69,17 +70,19 @@ class SnakeGameNode(Node):
             new_dir[1] == -current_dir[1]):
             return
 
-        self.direction = new_dir
+        self.pending_direction = new_dir
 
 
 
     def update_game(self):
+        
         if self.game_over:
             state = "WIN" if self.win else "LOSE"
             msg = String()
             msg.data = f"{self.snake}|{self.food}|{self.score}|{state}"
             self.state_pub.publish(msg)
             return
+        self.direction = self.pending_direction
         head_x, head_y = self.snake[0]
         dx, dy = self.direction
         new_head = (head_x + dx, head_y + dy)
@@ -116,6 +119,7 @@ class SnakeGameNode(Node):
     def reset_game(self):
         self.snake = [(10, 10), (9, 10), (8, 10)]
         self.direction = (1, 0)
+        self.pending_direction = self.direction
         self.food = self.spawn_food()
         self.score = 0
         self.game_over = False

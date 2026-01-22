@@ -27,7 +27,7 @@ class RendererNode(Node):
         self.screen = pygame.display.set_mode(
             (WINDOW_SIZE, WINDOW_SIZE)
         )
-        pygame.display.set_caption("ROS2 Snake")
+        pygame.display.set_caption("Antonsula's snake-game")
 
         self.direction_pub = self.create_publisher(
             String,
@@ -42,7 +42,7 @@ class RendererNode(Node):
             10
         )
 
-        self.timer = self.create_timer(0.05, self.handle_events)
+        self.timer = self.create_timer(0.15, self.handle_events)
 
         self.get_logger().info("Renderer node started")
     def draw_win_text(self, score):
@@ -98,7 +98,28 @@ class RendererNode(Node):
                     return
 
                 self.direction_pub.publish(msg)
+    def draw_eyes(self, cx, cy, dx, dy):
+        eye_offset = CELL_SIZE // 6
+        eye_radius = 3
 
+        # Perpendicular direction for eye spacing
+        px, py = -dy, dx
+
+        eye1 = (
+            cx + dx * 6 + px * eye_offset,
+            cy + dy * 6 + py * eye_offset
+        )
+        eye2 = (
+            cx + dx * 6 - px * eye_offset,
+            cy + dy * 6 - py * eye_offset
+        )
+
+        pygame.draw.circle(self.screen, (255, 255, 255), eye1, eye_radius)
+        pygame.draw.circle(self.screen, (255, 255, 255), eye2, eye_radius)
+
+        pygame.draw.circle(self.screen, (0, 0, 0), eye1, 1)
+        pygame.draw.circle(self.screen, (0, 0, 0), eye2, 1)
+    
     def draw(self, msg):
         parts = msg.data.split('|')
 
@@ -108,6 +129,15 @@ class RendererNode(Node):
 
         snake_str, food_str, score_str, state = parts
         snake = ast.literal_eval(snake_str)
+        head_x, head_y = snake[0]
+
+        if len(snake) > 1:
+            neck_x, neck_y = snake[1]
+            dir_x = head_x - neck_x
+            dir_y = head_y - neck_y
+        else:
+            dir_x, dir_y = 1, 0
+
         food = ast.literal_eval(food_str)
         score = int(score_str)
 
@@ -126,19 +156,32 @@ class RendererNode(Node):
             pygame.display.flip()
             return
 
-        # PLAYING state
-        for x, y in snake:
+        for i, (x, y) in enumerate(snake):
+            # Body segment
             pygame.draw.rect(
                 self.screen,
-                (0, 255, 0),
-                (x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE)
+                (0, 180, 0),
+                (
+                    int(x * CELL_SIZE),
+                    int(y * CELL_SIZE),
+                    CELL_SIZE,
+                    CELL_SIZE
+                ),
+                border_radius=6
             )
+
+            # Head extras
+            if i == 0:
+                cx = int(x * CELL_SIZE + CELL_SIZE // 2)
+                cy = int(y * CELL_SIZE + CELL_SIZE // 2)
+                self.draw_eyes(cx, cy, dir_x, dir_y)
 
         fx, fy = food
         pygame.draw.rect(
             self.screen,
             (255, 0, 0),
-            (fx * CELL_SIZE, fy * CELL_SIZE, CELL_SIZE, CELL_SIZE)
+            (fx * CELL_SIZE, fy * CELL_SIZE, CELL_SIZE, CELL_SIZE),
+            border_radius=20
         )
 
         font = pygame.font.SysFont(None, 32)
