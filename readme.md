@@ -1,4 +1,4 @@
-# ROS 2 Snake Game 🐍🎮
+# ROS 2 Snake Game
 
 A simple graphical Snake game implemented in **ROS 2 (rclpy)** and **Pygame**, designed to run on **WSL with XLaunch**.
 
