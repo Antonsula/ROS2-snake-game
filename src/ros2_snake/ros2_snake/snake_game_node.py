@@ -4,7 +4,9 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
 import random
+import os
 
+SCORE_FILE = os.path.expanduser("~/.ros2_snake_highscore.txt")
 GRID_WIDTH = 20
 GRID_HEIGHT = 20
 
@@ -19,9 +21,15 @@ class SnakeGameNode(Node):
         self.pending_direction = self.direction
         self.food = self.spawn_food()
         self.score = 0
+        self.high_score = 0
+        self.load_high_score()
+        self.started = False
         self.game_over = False
-        self.win = False
-
+        self.new_high_score = False
+        self.base_speed = 0.2
+        self.max_speed = 0.06
+        self.speed_step = 0.01
+        self.timer_period = self.base_speed
         # ROS interfaces
         self.dir_sub = self.create_subscription(
             String,
@@ -37,7 +45,7 @@ class SnakeGameNode(Node):
         )
 
         # Game loop timer
-        self.timer = self.create_timer(0.15, self.update_game)
+        self.timer = self.create_timer(self.timer_period, self.update_game)
 
         self.get_logger().info("Snake game node started")
 
@@ -48,6 +56,10 @@ class SnakeGameNode(Node):
         )
 
     def direction_callback(self, msg):
+        if msg.data == 'START':
+            self.started = True
+            self.get_logger().info('Game Started')
+            return
         if msg.data == "RESET":
             self.reset_game()
             return
@@ -72,14 +84,32 @@ class SnakeGameNode(Node):
 
         self.pending_direction = new_dir
 
+    def increase_speed(self):
+        new_period = max(
+            self.max_speed,
+            self.timer_period - self.speed_step
+        )
+
+        if new_period < self.timer_period:
+            self.timer.cancel()
+            self.timer_period = new_period
+            self.timer = self.create_timer(self.timer_period, self.update_game)
+
+            self.get_logger().info(
+                f"Speed increased: {self.timer_period:.2f}s"
+            )
 
 
     def update_game(self):
-        
-        if self.game_over:
-            state = "WIN" if self.win else "LOSE"
+        if not self.started:
             msg = String()
-            msg.data = f"{self.snake}|{self.food}|{self.score}|{state}"
+            msg.data = f"{self.snake}|{self.food}|{self.score}|{self.high_score}|START"
+            self.state_pub.publish(msg)
+            return
+        if self.game_over:
+            state = "NEW_HIGH_SCORE" if self.new_high_score else "LOSE"
+            msg = String()
+            msg.data = f"{self.snake}|{self.food}|{self.score}|{self.high_score}|{state}"
             self.state_pub.publish(msg)
             return
         self.direction = self.pending_direction
@@ -94,11 +124,8 @@ class SnakeGameNode(Node):
             new_head[1] < 0 or new_head[1] >= GRID_HEIGHT
         ):
             self.get_logger().info("YOU LOST")
-            self.game_over = True
-            return
-        if self.score >= 200:
-            self.get_logger().info('YOU WON!')
-            self.win = True
+            if self.new_high_score:
+                self.save_high_score()
             self.game_over = True
             return
         self.snake.insert(0, new_head)
@@ -106,14 +133,18 @@ class SnakeGameNode(Node):
         if new_head == self.food:
             self.get_logger().info(f"Score: {self.score}")
             self.score += 10
+            if self.score > self.high_score:
+                self.high_score = self.score
+                self.new_high_score = True
             self.food = self.spawn_food()
-
+            self.increase_speed()
         else:
             self.snake.pop()
 
         msg = String()
         state = "PLAYING"
-        msg.data = f"{self.snake}|{self.food}|{self.score}|{state}"
+        msg.data = f"{self.snake}|{self.food}|{self.score}|{self.high_score}|{state}|{self.timer_period}"
+
         self.state_pub.publish(msg)
 
     def reset_game(self):
@@ -122,9 +153,34 @@ class SnakeGameNode(Node):
         self.pending_direction = self.direction
         self.food = self.spawn_food()
         self.score = 0
+        self.timer.cancel()
+        self.timer_period = self.base_speed
+        self.timer = self.create_timer(self.timer_period, self.update_game)
         self.game_over = False
-        self.win = False
+        self.new_high_score = False
+        self.started = False
+        
         self.get_logger().info("Game restarted")
+
+    def load_high_score(self):
+        try:
+            with open(SCORE_FILE, "r") as f:
+                self.high_score = int(f.read().strip())
+                self.get_logger().info(
+                    f"Loaded high score: {self.high_score}"
+                )
+        except Exception:
+            self.high_score = 0
+
+
+    def save_high_score(self):
+        try:
+            with open(SCORE_FILE, "w") as f:
+                f.write(str(self.high_score))
+        except Exception as e:
+            self.get_logger().warn(
+                f"Could not save high score: {e}"
+            )
 
 def main():
     rclpy.init()

@@ -6,6 +6,9 @@ from std_msgs.msg import String
 import pygame
 import ast
 import random
+import os
+from ament_index_python.packages import get_package_share_directory
+
 CELL_SIZE = 25
 GRID_SIZE = 20
 WINDOW_SIZE = CELL_SIZE * GRID_SIZE
@@ -29,6 +32,16 @@ class RendererNode(Node):
         )
         pygame.display.set_caption("Antonsula's snake-game")
 
+
+        pkg_share = get_package_share_directory('ros2_snake')
+        image_path = os.path.join(pkg_share, 'assets', 'background.jpg')
+
+        self.start_bg = pygame.image.load(image_path).convert()
+        self.start_bg = pygame.transform.scale(
+            self.start_bg,
+            (WINDOW_SIZE, WINDOW_SIZE)
+        )
+
         self.direction_pub = self.create_publisher(
             String,
             '/direction',
@@ -38,11 +51,18 @@ class RendererNode(Node):
         self.state_sub = self.create_subscription(
             String,
             '/game_state',
-            self.draw,
+            self.on_state,
             10
         )
 
-        self.timer = self.create_timer(0.15, self.handle_events)
+        self.last_state_time = pygame.time.get_ticks()
+        self.move_duration = 150 
+        self.prev_snake = None
+        self.latest_state = None
+        self.target_snake = None
+
+        self.latest_time = pygame.time.get_ticks()
+        self.timer = self.create_timer(0.016, self.render)
 
         self.get_logger().info("Renderer node started")
     def draw_win_text(self, score):
@@ -74,7 +94,15 @@ class RendererNode(Node):
                 (conf[0], conf[1]),
                 4
             )
+    def on_state(self, msg):
+        self.latest_state = msg.data
 
+
+    def render(self):
+        self.handle_events()
+        if self.latest_state is None:
+            return
+        self.draw(self.latest_state)
     def handle_events(self):
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -94,6 +122,8 @@ class RendererNode(Node):
                     msg.data = 'RIGHT'
                 elif event.key == pygame.K_r:
                      msg.data = 'RESET'
+                elif event.key == pygame.K_SPACE:
+                    msg.data = 'START'
                 else:
                     return
 
@@ -120,17 +150,66 @@ class RendererNode(Node):
         pygame.draw.circle(self.screen, (0, 0, 0), eye1, 1)
         pygame.draw.circle(self.screen, (0, 0, 0), eye2, 1)
     
-    def draw(self, msg):
-        parts = msg.data.split('|')
+    def draw(self, state_string):
+        parts = state_string.split('|')
 
-        # Safety: wait for valid messages
-        if len(parts) < 4:
+        if len(parts) == 4:
+            snake_str, food_str, score_str, state = parts
+            high_score_str = score_str
+        elif len(parts) == 5:
+            snake_str, food_str, score_str, high_score_str, state = parts
+        elif len(parts) == 6:
+            snake_str, food_str, score_str, high_score_str, state, period_str = parts
+            self.move_duration = float(period_str) * 1000
+        else:
             return
 
-        snake_str, food_str, score_str, state = parts
+        # Parse state FIRST
         snake = ast.literal_eval(snake_str)
-        head_x, head_y = snake[0]
+        food = ast.literal_eval(food_str)
+        score = int(score_str)
+        high_score = int(high_score_str)
 
+        current_time = pygame.time.get_ticks()
+
+        # First-ever frame
+        if self.target_snake is None:
+            self.prev_snake = snake
+            self.target_snake = snake
+            self.last_state_time = current_time
+
+        # New logical step arrived from game node
+        elif snake != self.target_snake:
+            self.prev_snake = self.target_snake
+            self.target_snake = snake
+            self.last_state_time = current_time
+
+
+        # Interpolation factor
+        elapsed = current_time - self.last_state_time
+        t = min(elapsed / self.move_duration, 1.0)
+
+        # Handle non-playing screens early
+        if state == 'START':
+            self.draw_start_screen(high_score)
+            pygame.display.flip()
+            return
+
+        if state == 'NEW_HIGH_SCORE':
+            self.screen.fill((30, 30, 30))
+            self.draw_confetti()
+            self.draw_new_high_score_text(score)
+            pygame.display.flip()
+            return
+
+        if state == 'LOSE':
+            self.screen.fill((30, 30, 30))
+            self.draw_lose_text(score)
+            pygame.display.flip()
+            return
+
+        # Determine head direction (for eyes)
+        head_x, head_y = snake[0]
         if len(snake) > 1:
             neck_x, neck_y = snake[1]
             dir_x = head_x - neck_x
@@ -138,44 +217,35 @@ class RendererNode(Node):
         else:
             dir_x, dir_y = 1, 0
 
-        food = ast.literal_eval(food_str)
-        score = int(score_str)
-
         self.screen.fill((30, 30, 30))
 
-        # WIN screen
-        if state == "WIN":
-            self.draw_confetti()
-            self.draw_win_text(score)
-            pygame.display.flip()
-            return
+        # 🔥 SMOOTH INTERPOLATED SNAKE DRAW
+        for i, (x, y) in enumerate(self.target_snake):
 
-        # LOSE screen
-        if state == "LOSE":
-            self.draw_lose_text(score)
-            pygame.display.flip()
-            return
+            if i < len(self.prev_snake):
+                px, py = self.prev_snake[i]
+            else:
+                px, py = x, y
 
-        for i, (x, y) in enumerate(snake):
-            # Body segment
+            ix = px + (x - px) * t
+            iy = py + (y - py) * t
+
+            draw_x = int(ix * CELL_SIZE)
+            draw_y = int(iy * CELL_SIZE)
+
             pygame.draw.rect(
                 self.screen,
                 (0, 180, 0),
-                (
-                    int(x * CELL_SIZE),
-                    int(y * CELL_SIZE),
-                    CELL_SIZE,
-                    CELL_SIZE
-                ),
+                (draw_x, draw_y, CELL_SIZE, CELL_SIZE),
                 border_radius=6
             )
 
-            # Head extras
             if i == 0:
-                cx = int(x * CELL_SIZE + CELL_SIZE // 2)
-                cy = int(y * CELL_SIZE + CELL_SIZE // 2)
+                cx = draw_x + CELL_SIZE // 2
+                cy = draw_y + CELL_SIZE // 2
                 self.draw_eyes(cx, cy, dir_x, dir_y)
 
+        # Food (no interpolation needed)
         fx, fy = food
         pygame.draw.rect(
             self.screen,
@@ -185,10 +255,18 @@ class RendererNode(Node):
         )
 
         font = pygame.font.SysFont(None, 32)
-        score_surface = font.render(f"Score: {score}", True, (255, 255, 255))
-        self.screen.blit(score_surface, (5, 5))
+        self.screen.blit(
+            font.render(f"Score: {score}", True, (255, 255, 255)),
+            (5, 5)
+        )
+        self.screen.blit(
+            font.render(f"High Score: {high_score}", True, (255, 215, 0)),
+            (5, 35)
+        )
 
         pygame.display.flip()
+
+
 
     def draw_lose_text(self, score):
         font = pygame.font.SysFont(None, 72)
@@ -206,6 +284,48 @@ class RendererNode(Node):
         hint_rect = hint.get_rect(center=(WINDOW_SIZE // 2, WINDOW_SIZE // 2 + 110))
         self.screen.blit(hint, hint_rect)
 
+    def draw_new_high_score_text(self, score):
+        font = pygame.font.SysFont(None, 60)
+        text = font.render("NEW HIGH SCORE!", True, (255, 215, 0))
+        rect = text.get_rect(center=(WINDOW_SIZE // 2, WINDOW_SIZE // 2))
+        self.screen.blit(text, rect)
+
+        score_font = pygame.font.SysFont(None, 40)
+        score_text = score_font.render(f"Score: {score}", True, (255, 255, 255))
+        score_rect = score_text.get_rect(center=(WINDOW_SIZE // 2, WINDOW_SIZE // 2 + 60))
+        self.screen.blit(score_text, score_rect)
+
+        hint_font = pygame.font.SysFont(None, 28)
+        hint = hint_font.render("Press R to try again", True, (255, 255, 255))
+        hint_rect = hint.get_rect(center=(WINDOW_SIZE // 2, WINDOW_SIZE // 2 + 110))
+        self.screen.blit(hint, hint_rect)
+
+    def draw_start_screen(self, high_score):
+        self.screen.blit(self.start_bg, (0, 0))
+        overlay = pygame.Surface((WINDOW_SIZE, WINDOW_SIZE))
+        overlay.set_alpha(120)
+        overlay.fill((0, 0, 0))
+        self.screen.blit(overlay, (0, 0))
+        title_font_1 = pygame.font.SysFont(None, 30)
+        title_font_2 = pygame.font.SysFont(None, 40)
+        line1 = title_font_1.render("Welcome to Antonsula's snake game", True, (0, 200, 0))
+        line2 = title_font_2.render("GOOD LUCK!", True, (243, 229, 31))
+
+        line1_rect = line1.get_rect(center=(WINDOW_SIZE // 2, WINDOW_SIZE // 2 - 80))
+        line2_rect = line2.get_rect(center=(WINDOW_SIZE // 2, WINDOW_SIZE // 2 - 20))
+
+        self.screen.blit(line1, line1_rect)
+        self.screen.blit(line2, line2_rect)
+
+        info_font = pygame.font.SysFont(None, 36)
+        info = info_font.render("Press SPACE to start", True, (255, 255, 255))
+        info_rect = info.get_rect(center=(WINDOW_SIZE // 2, WINDOW_SIZE // 2+10))
+        self.screen.blit(info, info_rect)
+
+        hs_font = pygame.font.SysFont(None, 28)
+        hs = hs_font.render(f"High Score: {high_score}", True, (255, 215, 0))
+        hs_rect = hs.get_rect(center=(WINDOW_SIZE // 2, WINDOW_SIZE // 2 + 50))
+        self.screen.blit(hs, hs_rect)
 
 def main():
     rclpy.init()
