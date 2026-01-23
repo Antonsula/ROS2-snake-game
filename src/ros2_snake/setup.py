@@ -29,6 +29,7 @@ setup(
         'console_scripts': [
             'snake_game = ros2_snake.snake_game_node:main',
             'renderer = ros2_snake.renderer_node:main',
+            'controller = ros2_snake.snake_controller_node:main'
         ],
     },
 )

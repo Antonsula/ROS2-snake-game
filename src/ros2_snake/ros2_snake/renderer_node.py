@@ -122,8 +122,10 @@ class RendererNode(Node):
                     msg.data = 'RIGHT'
                 elif event.key == pygame.K_r:
                      msg.data = 'RESET'
-                elif event.key == pygame.K_SPACE:
-                    msg.data = 'START'
+                elif event.key == pygame.K_1:
+                    msg.data = 'START_HUMAN'
+                elif event.key == pygame.K_2:
+                    msg.data = 'START_AI'
                 else:
                     return
 
@@ -161,12 +163,19 @@ class RendererNode(Node):
         elif len(parts) == 6:
             snake_str, food_str, score_str, high_score_str, state, period_str = parts
             self.move_duration = float(period_str) * 1000
+        elif len(parts) == 8:
+            snake_str, food_str, obstacles_str, score_str, high_score_str, state, period_str, mode = parts
+            self.move_duration = float(period_str) * 1000
+        elif len(parts) == 7:
+            snake_str, food_str, obstacles_str, score_str, high_score_str, state, period_str = parts
+            mode = None
         else:
             return
 
         # Parse state FIRST
         snake = ast.literal_eval(snake_str)
         food = ast.literal_eval(food_str)
+        
         score = int(score_str)
         high_score = int(high_score_str)
 
@@ -194,7 +203,7 @@ class RendererNode(Node):
             self.draw_start_screen(high_score)
             pygame.display.flip()
             return
-
+        obstacles = ast.literal_eval(obstacles_str)
         if state == 'NEW_HIGH_SCORE':
             self.screen.fill((30, 30, 30))
             self.draw_confetti()
@@ -219,7 +228,41 @@ class RendererNode(Node):
 
         self.screen.fill((30, 30, 30))
 
-        # 🔥 SMOOTH INTERPOLATED SNAKE DRAW
+        for ox, oy in obstacles:
+            x = ox * CELL_SIZE
+            y = oy * CELL_SIZE
+
+            # Yellow base
+            pygame.draw.rect(
+                self.screen,
+                (255, 215, 0),  # yellow
+                (x, y, CELL_SIZE, CELL_SIZE),
+                border_radius=4
+            )
+
+            # Black X (cross)
+            thickness = 3
+            padding = 5
+
+            pygame.draw.line(
+                self.screen,
+                (0, 0, 0),
+                (x + padding, y + padding),
+                (x + CELL_SIZE - padding, y + CELL_SIZE - padding),
+                thickness
+            )
+
+            pygame.draw.line(
+                self.screen,
+                (0, 0, 0),
+                (x + CELL_SIZE - padding, y + padding),
+                (x + padding, y + CELL_SIZE - padding),
+                thickness
+            )
+
+        
+        
+        # SMOOTH INTERPOLATED SNAKE DRAW
         for i, (x, y) in enumerate(self.target_snake):
 
             if i < len(self.prev_snake):
@@ -306,26 +349,24 @@ class RendererNode(Node):
         overlay.set_alpha(120)
         overlay.fill((0, 0, 0))
         self.screen.blit(overlay, (0, 0))
-        title_font_1 = pygame.font.SysFont(None, 30)
-        title_font_2 = pygame.font.SysFont(None, 40)
-        line1 = title_font_1.render("Welcome to Antonsula's snake game", True, (0, 200, 0))
-        line2 = title_font_2.render("GOOD LUCK!", True, (243, 229, 31))
+        title_font_1 = pygame.font.SysFont(None, 50)
+        line1 = title_font_1.render("Antonsula's snake game", True, (0, 200, 0))
 
         line1_rect = line1.get_rect(center=(WINDOW_SIZE // 2, WINDOW_SIZE // 2 - 80))
-        line2_rect = line2.get_rect(center=(WINDOW_SIZE // 2, WINDOW_SIZE // 2 - 20))
 
         self.screen.blit(line1, line1_rect)
-        self.screen.blit(line2, line2_rect)
 
         info_font = pygame.font.SysFont(None, 36)
-        info = info_font.render("Press SPACE to start", True, (255, 255, 255))
-        info_rect = info.get_rect(center=(WINDOW_SIZE // 2, WINDOW_SIZE // 2+10))
-        self.screen.blit(info, info_rect)
 
         hs_font = pygame.font.SysFont(None, 28)
         hs = hs_font.render(f"High Score: {high_score}", True, (255, 215, 0))
-        hs_rect = hs.get_rect(center=(WINDOW_SIZE // 2, WINDOW_SIZE // 2 + 50))
+        hs_rect = hs.get_rect(center=(WINDOW_SIZE // 2, WINDOW_SIZE // 2 + 120))
         self.screen.blit(hs, hs_rect)
+        info1 = info_font.render("1 – Play yourself (WASD)", True, (255, 255, 255))
+        info2 = info_font.render("2 – Watch AI play", True, (255, 255, 255))
+
+        self.screen.blit(info1, (WINDOW_SIZE//2 - 150, WINDOW_SIZE//2 + 20))
+        self.screen.blit(info2, (WINDOW_SIZE//2 - 150, WINDOW_SIZE//2 + 60))
 
 def main():
     rclpy.init()
