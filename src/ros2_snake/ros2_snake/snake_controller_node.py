@@ -4,9 +4,7 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
 import ast
-import random
-import math
-
+from collections import deque
 GRID_WIDTH = 20
 GRID_HEIGHT = 20
 
@@ -45,6 +43,8 @@ class SnakeController(Node):
         }
 
         self.get_logger().info("Snake AI controller started")
+        self.last_head = None
+        self.stuck_counter = 0
 
     def on_state(self, msg):
         parts = msg.data.split('|')
@@ -69,13 +69,62 @@ class SnakeController(Node):
         cmd = String()
         cmd.data = direction
         self.cmd_pub.publish(cmd)
+        head = snake[0]
 
+        if self.last_head == head:
+            self.stuck_counter += 1
+        else:
+            self.stuck_counter = 0
+
+        self.last_head = head
+
+
+    def can_reach_tail(self, snake, obstacles):
+        head = snake[0]
+        tail = snake[-1]
+        body = set(snake[:-1])  # tail moves, so exclude it
+
+        visited = set()
+        q = deque([head])
+
+        while q:
+            x, y = q.popleft()
+            if (x, y) == tail:
+                return True
+
+            for dx, dy in [(1,0), (-1,0), (0,1), (0,-1)]:
+                nx, ny = x + dx, y + dy
+                if (
+                    0 <= nx < GRID_WIDTH and
+                    0 <= ny < GRID_HEIGHT and
+                    (nx, ny) not in obstacles and
+                    (nx, ny) not in body and
+                    (nx, ny) not in visited
+                ):
+                    visited.add((nx, ny))
+                    q.append((nx, ny))
+
+        return False
+
+    def free_neighbors(self, x, y, snake, obstacles):
+        count = 0
+        for dx, dy in [(1,0), (-1,0), (0,1), (0,-1)]:
+            nx, ny = x + dx, y + dy
+            if (
+                0 <= nx < GRID_WIDTH and
+                0 <= ny < GRID_HEIGHT and
+                (nx, ny) not in obstacles and
+                (nx, ny) not in snake[:-1]
+            ):
+                count += 1
+        return count
 
     def decide_move(self, snake, food, obstacles):
         head_x, head_y = snake[0]
         fx, fy = food
 
         safe_moves = []
+        scored_moves = []
 
         for move, (dx, dy) in self.moves.items():
             # Prevent reversing
@@ -92,24 +141,52 @@ class SnakeController(Node):
             if (nx, ny) in obstacles:
                 continue
 
-            # Self collision (ignore last tail cell since it moves)
-            if (nx, ny) in snake[:-1]:
+            # Self collision (ignore last tail cell)
+            if (nx, ny) in snake[:]:
                 continue
 
             safe_moves.append(move)
+            # simulate move
+            sim_snake = [(nx, ny)] + snake[:-1]
+
+            # eject move if it traps the snake
+            if not self.can_reach_tail(sim_snake, obstacles):
+                continue
+
+            # Base score: distance to food
+            score = abs(nx - fx) + abs(ny - fy)
+
+            # Small bias to continue forward
+            if move == self.current_direction:
+                score -= 0.2
+
+            # Penalize low-exit tiles
+            exits = self.free_neighbors(nx, ny, snake, obstacles)
+            if exits <= 1:
+                score += 2
+            elif exits == 2:
+                score += 1
+
+            scored_moves.append((score, move))
 
         if not safe_moves:
-            return None  # no legal move
+            return None
 
-        # Prefer moves that reduce distance to food
-        def distance(move):
-            dx, dy = self.moves[move]
-            nx, ny = head_x + dx, head_y + dy
-            return abs(nx - fx) + abs(ny - fy)
+        # ESCAPE MODE if stuck
+        if self.stuck_counter > 6:
+            safe_moves.sort(
+                key=lambda m: -self.free_neighbors(
+                    head_x + self.moves[m][0],
+                    head_y + self.moves[m][1],
+                    snake,
+                    obstacles
+                )
+            )
+            return safe_moves[0]
 
-        safe_moves.sort(key=distance)
-
-        return safe_moves[0]
+        # Normal greedy choice
+        scored_moves.sort()
+        return scored_moves[0][1]
 
 
 def main():
