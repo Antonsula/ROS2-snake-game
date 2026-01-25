@@ -20,8 +20,13 @@ class SnakeGameNode(Node):
         self.direction = (1, 0)  # moving right
         self.pending_direction = self.direction
         self.num_obstacles = 5
+        self.food = None
+        self.obstacles = []
+
         self.obstacles = self.spawn_obstacles()
         self.food = self.spawn_food()
+        self.obstacle_step = 30
+        self.last_obstacle_score = 0
         self.score = 0
         self.high_score = 0
         self.load_high_score()
@@ -57,10 +62,10 @@ class SnakeGameNode(Node):
     def spawn_food(self):
         while True:
             pos = (
-                random.randint(0, GRID_WIDTH - 1),
-                random.randint(0, GRID_HEIGHT - 1)
+                random.randint(0, GRID_WIDTH - 2),
+                random.randint(0, GRID_HEIGHT - 2)
             )
-
+            
             if (
                 pos not in self.snake and
                 pos not in self.obstacles
@@ -69,17 +74,27 @@ class SnakeGameNode(Node):
 
     def spawn_obstacles(self):
         obstacles = set()
+        head = self.snake[0]
 
         while len(obstacles) < self.num_obstacles:
             pos = (
-                random.randint(0, GRID_WIDTH - 1),
-                random.randint(0, GRID_HEIGHT - 1)
+                random.randint(1, GRID_WIDTH - 2),
+                random.randint(1, GRID_HEIGHT - 2)
             )
 
-            if pos not in self.snake:
+            if (
+                pos not in self.snake and
+                pos != self.food and
+                abs(pos[0] - head[0]) + abs(pos[1] - head[1]) > 2
+            ):
                 obstacles.add(pos)
 
         return list(obstacles)
+
+    
+    def respawn_obstacles(self):
+        self.obstacles = self.spawn_obstacles()
+        self.get_logger().info("Obstacles changed")
 
     def direction_callback(self, msg):
 
@@ -193,8 +208,12 @@ class SnakeGameNode(Node):
             if self.score > self.high_score:
                 self.high_score = self.score
                 self.new_high_score = True
+            
             self.food = self.spawn_food()
             self.increase_speed()
+            if self.score - self.last_obstacle_score >= self.obstacle_step:
+                self.respawn_obstacles()
+                self.last_obstacle_score = self.score
         else:
             self.snake.pop()
 
@@ -207,6 +226,7 @@ class SnakeGameNode(Node):
         self.obstacles = self.spawn_obstacles()
         self.food = self.spawn_food()
         self.score = 0
+        self.last_obstacle_score = 0
         self.timer.cancel()
         self.timer_period = self.base_speed
         self.timer = self.create_timer(self.timer_period, self.update_game)
