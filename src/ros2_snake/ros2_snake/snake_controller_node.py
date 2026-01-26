@@ -9,6 +9,18 @@ GRID_WIDTH = 20
 GRID_HEIGHT = 20
 
 
+def build_hamiltonian_cycle(width, height):
+    cycle = []
+    for y in range(height):
+        if y % 2 == 0:
+            for x in range(width):
+                cycle.append((x, y))
+        else:
+            for x in reversed(range(width)):
+                cycle.append((x, y))
+    return cycle
+
+
 class SnakeController(Node):
     def __init__(self):
         super().__init__('snake_controller')
@@ -26,6 +38,11 @@ class SnakeController(Node):
             10
         )
 
+        # Hamiltonian setup
+        self.cycle = build_hamiltonian_cycle(GRID_WIDTH, GRID_HEIGHT)
+        self.index = {pos: i for i, pos in enumerate(self.cycle)}
+        self.cycle_len = len(self.cycle)
+
         self.current_direction = None
 
         self.moves = {
@@ -35,16 +52,7 @@ class SnakeController(Node):
             'RIGHT': (1, 0),
         }
 
-        self.opposite = {
-            'UP': 'DOWN',
-            'DOWN': 'UP',
-            'LEFT': 'RIGHT',
-            'RIGHT': 'LEFT',
-        }
-
-        self.get_logger().info("Snake AI controller started")
-        self.last_head = None
-        self.stuck_counter = 0
+        self.get_logger().info("Hamiltonian Snake AI started")
 
     def on_state(self, msg):
         parts = msg.data.split('|')
@@ -57,136 +65,122 @@ class SnakeController(Node):
         state = parts[5]
         control_mode = parts[7]
 
-        # 🚫 Do nothing unless AI mode is active
         if state != "PLAYING" or control_mode != "AI":
             return
 
-        direction = self.decide_move(snake, food, obstacles)
-        if direction is None:
+        move = self.decide_move(snake, food, obstacles)
+        if move is None:
             return
 
-        self.current_direction = direction
+        self.current_direction = move
         cmd = String()
-        cmd.data = direction
+        cmd.data = move
         self.cmd_pub.publish(cmd)
-        head = snake[0]
 
-        if self.last_head == head:
-            self.stuck_counter += 1
-        else:
-            self.stuck_counter = 0
-
-        self.last_head = head
-
+    # ---------------- LOGIC ---------------- #
+    
 
     def can_reach_tail(self, snake, obstacles):
+        """
+        Check if head can reach tail without crossing body or obstacles.
+        Tail is excluded because it moves.
+        """
         head = snake[0]
         tail = snake[-1]
-        body = set(snake[:-1])  # tail moves, so exclude it
 
+        blocked = set(obstacles) | set(snake[:-1])  # tail excluded
         visited = set()
         q = deque([head])
 
         while q:
             x, y = q.popleft()
+
             if (x, y) == tail:
                 return True
 
             for dx, dy in [(1,0), (-1,0), (0,1), (0,-1)]:
                 nx, ny = x + dx, y + dy
+                nxt = (nx, ny)
+
                 if (
                     0 <= nx < GRID_WIDTH and
                     0 <= ny < GRID_HEIGHT and
-                    (nx, ny) not in obstacles and
-                    (nx, ny) not in body and
-                    (nx, ny) not in visited
+                    nxt not in blocked and
+                    nxt not in visited
                 ):
-                    visited.add((nx, ny))
-                    q.append((nx, ny))
+                    visited.add(nxt)
+                    q.append(nxt)
 
         return False
 
-    def free_neighbors(self, x, y, snake, obstacles):
-        count = 0
-        for dx, dy in [(1,0), (-1,0), (0,1), (0,-1)]:
-            nx, ny = x + dx, y + dy
-            if (
-                0 <= nx < GRID_WIDTH and
-                0 <= ny < GRID_HEIGHT and
-                (nx, ny) not in obstacles and
-                (nx, ny) not in snake[:-1]
-            ):
-                count += 1
-        return count
-
     def decide_move(self, snake, food, obstacles):
-        head_x, head_y = snake[0]
-        fx, fy = food
+        head = snake[0]
 
-        safe_moves = []
-        scored_moves = []
+        blocked = set(obstacles) | set(snake[:-1])
 
-        for move, (dx, dy) in self.moves.items():
-            # Prevent reversing
-            if self.current_direction and move == self.opposite[self.current_direction]:
+        # 1️⃣ Try SAFE path to food
+        path = self.astar(head, food, blocked)
+        if path:
+            next_pos = path[0]
+
+            # simulate snake after eating food
+            sim_snake = [next_pos] + snake[:-1]
+
+            # tail must still be reachable
+            if self.can_reach_tail(sim_snake, obstacles):
+                return self.move_from_positions(head, next_pos)
+
+        # 2️⃣ Try path to tail (stall safely)
+        tail = snake[-1]
+        path = self.astar(head, tail, blocked - {tail})
+        if path:
+            return self.move_from_positions(head, path[0])
+
+        # 3️⃣ Hamiltonian fallback (guaranteed safe)
+        head_i = self.index[head]
+        next_pos = self.cycle[(head_i + 1) % self.cycle_len]
+        return self.move_from_positions(head, next_pos)
+
+    def astar(self, start, goal, blocked):
+        from heapq import heappush, heappop
+
+        h = lambda a, b: abs(a[0]-b[0]) + abs(a[1]-b[1])
+
+        open_set = []
+        heappush(open_set, (0 + h(start, goal), 0, start, []))
+        visited = set()
+
+        while open_set:
+            _, cost, current, path = heappop(open_set)
+            if current == goal:
+                return path
+
+            if current in visited:
                 continue
+            visited.add(current)
 
-            nx, ny = head_x + dx, head_y + dy
+            for dx, dy in [(1,0),(-1,0),(0,1),(0,-1)]:
+                nx, ny = current[0]+dx, current[1]+dy
+                nxt = (nx, ny)
 
-            # Wall collision
-            if nx < 0 or nx >= GRID_WIDTH or ny < 0 or ny >= GRID_HEIGHT:
-                continue
+                if (
+                    0 <= nx < GRID_WIDTH and
+                    0 <= ny < GRID_HEIGHT and
+                    nxt not in blocked
+                ):
+                    heappush(
+                        open_set,
+                        (cost+1+h(nxt, goal), cost+1, nxt, path+[nxt])
+                    )
+        return None
 
-            # Obstacle collision
-            if (nx, ny) in obstacles:
-                continue
-
-            # Self collision (ignore last tail cell)
-            if (nx, ny) in snake[:]:
-                continue
-
-            safe_moves.append(move)
-            # simulate move
-            sim_snake = [(nx, ny)] + snake[:-1]
-
-            # eject move if it traps the snake
-            if not self.can_reach_tail(sim_snake, obstacles):
-                continue
-
-            # Base score: distance to food
-            score = abs(nx - fx) + abs(ny - fy)
-
-            # Small bias to continue forward
-            if move == self.current_direction:
-                score -= 0.2
-
-            # Penalize low-exit tiles
-            exits = self.free_neighbors(nx, ny, snake, obstacles)
-            if exits <= 1:
-                score += 2
-            elif exits == 2:
-                score += 1
-
-            scored_moves.append((score, move))
-
-        if not safe_moves:
-            return None
-
-        # ESCAPE MODE if stuck
-        if self.stuck_counter > 6:
-            safe_moves.sort(
-                key=lambda m: -self.free_neighbors(
-                    head_x + self.moves[m][0],
-                    head_y + self.moves[m][1],
-                    snake,
-                    obstacles
-                )
-            )
-            return safe_moves[0]
-
-        # Normal greedy choice
-        scored_moves.sort()
-        return scored_moves[0][1]
+    def move_from_positions(self, a, b):
+        dx = b[0] - a[0]
+        dy = b[1] - a[1]
+        for k, v in self.moves.items():
+            if v == (dx, dy):
+                return k
+        return None
 
 
 def main():

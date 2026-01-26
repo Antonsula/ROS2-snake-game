@@ -80,6 +80,27 @@ class RendererNode(Node):
         hint_rect = hint.get_rect(center=(WINDOW_SIZE // 2, WINDOW_SIZE // 2 + 110))
         self.screen.blit(hint, hint_rect)
 
+    def draw_difficulty_screen(self):
+        self.screen.blit(self.start_bg, (0, 0))
+
+        overlay = pygame.Surface((WINDOW_SIZE, WINDOW_SIZE))
+        overlay.set_alpha(160)
+        overlay.fill((0, 0, 0))
+        self.screen.blit(overlay, (0, 0))
+
+        font = pygame.font.SysFont(None, 36)
+        title = font.render("Choose Difficulty", True, (255, 215, 0))
+        self.screen.blit(title, (WINDOW_SIZE//2 - 120, 120))
+
+        options = [
+            "E - Easy 5 (obstacles, low speed)",
+            "M - Medium (10 obstacles, medium speed)",
+            "H - Hard (20 obstacles, high speed)",
+        ]
+
+        for i, text in enumerate(options):
+            line = font.render(text, True, (255, 255, 255))
+            self.screen.blit(line, (WINDOW_SIZE//2 - 160, 180 + i*40))
 
     def draw_confetti(self):
         for conf in self.confetti:
@@ -126,6 +147,12 @@ class RendererNode(Node):
                     msg.data = 'START_HUMAN'
                 elif event.key == pygame.K_2:
                     msg.data = 'START_AI'
+                elif event.key == pygame.K_e:
+                    msg.data = "DIFF_EASY"
+                elif event.key == pygame.K_m:
+                    msg.data = "DIFF_MEDIUM"
+                elif event.key == pygame.K_h:
+                    msg.data = "DIFF_HARD"
                 else:
                     return
 
@@ -153,24 +180,35 @@ class RendererNode(Node):
         pygame.draw.circle(self.screen, (0, 0, 0), eye2, 1)
     
     def draw(self, state_string):
+
         parts = state_string.split('|')
 
-        if len(parts) == 4:
-            snake_str, food_str, score_str, state = parts
-            high_score_str = score_str
-        elif len(parts) == 5:
-            snake_str, food_str, score_str, high_score_str, state = parts
-        elif len(parts) == 6:
-            snake_str, food_str, score_str, high_score_str, state, period_str = parts
+        if len(parts) == 9:
+            snake_str, food_str, obstacles_str, score_str, high_score_str, state, period_str, mode, difficulty = parts
             self.move_duration = float(period_str) * 1000
         elif len(parts) == 8:
             snake_str, food_str, obstacles_str, score_str, high_score_str, state, period_str, mode = parts
             self.move_duration = float(period_str) * 1000
+            difficulty = None
         elif len(parts) == 7:
             snake_str, food_str, obstacles_str, score_str, high_score_str, state, period_str = parts
             mode = None
+            difficulty = None
+        elif len(parts) == 6:
+            snake_str, food_str, score_str, high_score_str, state, period_str = parts
+            self.move_duration = float(period_str) * 1000
+            obstacles_str = "[]"
+        elif len(parts) == 5:
+            snake_str, food_str, score_str, high_score_str, state = parts
+            obstacles_str = "[]"
+        elif len(parts) == 4:
+            snake_str, food_str, score_str, state = parts
+            high_score_str = score_str
+            obstacles_str = "[]"
         else:
+            self.get_logger().warn(f"Bad state message: {state_string}")
             return
+
 
         # Parse state FIRST
         snake = ast.literal_eval(snake_str)
@@ -198,12 +236,17 @@ class RendererNode(Node):
         elapsed = current_time - self.last_state_time
         t = min(elapsed / self.move_duration, 1.0)
 
+        if state == "CHOOSE_DIFFICULTY":
+            self.draw_difficulty_screen()
+            pygame.display.flip()
+            return
+
         # Handle non-playing screens early
         if state == 'START':
             self.draw_start_screen(high_score)
             pygame.display.flip()
             return
-        obstacles = ast.literal_eval(obstacles_str)
+
         if state == 'NEW_HIGH_SCORE':
             self.screen.fill((30, 30, 30))
             self.draw_confetti()
@@ -216,7 +259,8 @@ class RendererNode(Node):
             self.draw_lose_text(score)
             pygame.display.flip()
             return
-
+        
+        obstacles = ast.literal_eval(obstacles_str)
         # Determine head direction (for eyes)
         head_x, head_y = snake[0]
         if len(snake) > 1:

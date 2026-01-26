@@ -19,13 +19,10 @@ class SnakeGameNode(Node):
         self.snake = [(10, 10), (9, 10), (8, 10)]
         self.direction = (1, 0)  # moving right
         self.pending_direction = self.direction
-        self.num_obstacles = 5
+        self.num_obstacles = 0
         self.food = None
         self.obstacles = []
-
-        self.obstacles = self.spawn_obstacles()
         self.food = self.spawn_food()
-        self.obstacle_step = 30
         self.last_obstacle_score = 0
         self.score = 0
         self.high_score = 0
@@ -34,11 +31,14 @@ class SnakeGameNode(Node):
         self.game_over = False
         self.new_high_score = False
         self.base_speed = 0.2
-        self.max_speed = 0.08
         self.speed_step = 0.01
         self.control_mode = None 
         self.timer_period = self.base_speed
-        
+        self.difficulty = None
+        self.difficulty_settings = {
+        "EASY":   {"max_obstacles": 5,  "obstacle_step": 50 , 'max_speed': 0.1},
+        "MEDIUM": {"max_obstacles": 10, "obstacle_step": 30, 'max_speed': 0.08},
+        "HARD":   {"max_obstacles": 20, "obstacle_step": 20,'max_speed': 0.05}}
         
         # ROS interfaces
         self.dir_sub = self.create_subscription(
@@ -72,11 +72,13 @@ class SnakeGameNode(Node):
             ):
                 return pos
 
-    def spawn_obstacles(self):
-        obstacles = set()
+    def spawn_one_obstacle(self):
+        if len(self.obstacles) >= self.max_obstacles:
+            return
+
         head = self.snake[0]
 
-        while len(obstacles) < self.num_obstacles:
+        while True:
             pos = (
                 random.randint(1, GRID_WIDTH - 2),
                 random.randint(1, GRID_HEIGHT - 2)
@@ -84,12 +86,15 @@ class SnakeGameNode(Node):
 
             if (
                 pos not in self.snake and
+                pos not in self.obstacles and
                 pos != self.food and
                 abs(pos[0] - head[0]) + abs(pos[1] - head[1]) > 2
             ):
-                obstacles.add(pos)
-
-        return list(obstacles)
+                self.obstacles.append(pos)
+                self.get_logger().info(
+                    f"Spawned obstacle {len(self.obstacles)}/{self.max_obstacles}"
+                )
+                return
 
     
     def respawn_obstacles(self):
@@ -108,6 +113,17 @@ class SnakeGameNode(Node):
             }[msg.data]
             return
         # Start options
+        
+        if msg.data == 'DIFF_EASY':
+            self.set_difficulty('EASY')
+            return
+        if msg.data == 'DIFF_MEDIUM':
+            self.set_difficulty('MEDIUM')
+            return
+        if msg.data == 'DIFF_HARD':
+            self.set_difficulty('HARD')
+            return
+        
         if msg.data == "START_HUMAN":
             self.started = True
             self.control_mode = "HUMAN"
@@ -149,6 +165,20 @@ class SnakeGameNode(Node):
             return
 
         self.pending_direction = new_dir
+    def set_difficulty(self,level):
+        if level not in self.difficulty_settings:
+            self.get_logger().warn(f"Unknown difficulty: {level}")
+            return
+        self.difficulty = level
+        self.max_obstacles = self.difficulty_settings[level]['max_obstacles']
+        self.obstacle_step = self.difficulty_settings[level]['obstacle_step']
+        self.max_speed = self.difficulty_settings[level]['max_speed']
+        self.obstacles = []       
+        self.last_obstacle_score = 0
+        self.get_logger().info(
+        f"Difficulty set to {level} "
+        f"(max_obstacles={self.max_obstacles}, "
+        f"step={self.obstacle_step})")
 
     def increase_speed(self):
         new_period = max(
@@ -170,13 +200,16 @@ class SnakeGameNode(Node):
         msg.data = (
             f"{self.snake}|{self.food}|{self.obstacles}|"
             f"{self.score}|{self.high_score}|{state}|"
-            f"{self.timer_period}|{self.control_mode}"
+            f"{self.timer_period}|{self.control_mode}|{self.difficulty}"
         )
         self.state_pub.publish(msg)
 
     def update_game(self):
         if not self.started:
-            self.publish_state("START")
+            if self.difficulty is None:
+                self.publish_state('CHOOSE_DIFFICULTY')
+            else:
+                self.publish_state("START")
             return
 
         if self.game_over:
@@ -212,7 +245,7 @@ class SnakeGameNode(Node):
             self.food = self.spawn_food()
             self.increase_speed()
             if self.score - self.last_obstacle_score >= self.obstacle_step:
-                self.respawn_obstacles()
+                self.spawn_one_obstacle()
                 self.last_obstacle_score = self.score
         else:
             self.snake.pop()
@@ -223,7 +256,7 @@ class SnakeGameNode(Node):
         self.snake = [(10, 10), (9, 10), (8, 10)]
         self.direction = (1, 0)
         self.pending_direction = self.direction
-        self.obstacles = self.spawn_obstacles()
+        self.obstacles = []
         self.food = self.spawn_food()
         self.score = 0
         self.last_obstacle_score = 0
@@ -233,7 +266,7 @@ class SnakeGameNode(Node):
         self.game_over = False
         self.new_high_score = False
         self.started = False
-        
+        self.difficulty = None
         self.get_logger().info("Game restarted")
 
     def load_high_score(self):
