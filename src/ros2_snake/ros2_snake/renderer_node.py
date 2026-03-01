@@ -93,14 +93,14 @@ class RendererNode(Node):
         self.screen.blit(title, (WINDOW_SIZE//2 - 120, 120))
 
         options = [
-            "E - Easy 5 (obstacles, low speed)",
-            "M - Medium (10 obstacles, medium speed)",
-            "H - Hard (20 obstacles, high speed)",
+            "E - Easy ",
+            "M - Medium",
+            "H - Hard",
         ]
 
         for i, text in enumerate(options):
             line = font.render(text, True, (255, 255, 255))
-            self.screen.blit(line, (WINDOW_SIZE//2 - 160, 180 + i*40))
+            self.screen.blit(line, (WINDOW_SIZE//2-80, 180 + i*40))
 
     def draw_confetti(self):
         for conf in self.confetti:
