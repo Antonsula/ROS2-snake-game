@@ -221,8 +221,11 @@ class SnakeGameNode(Node):
         dx, dy = self.direction
         new_head = (head_x + dx, head_y + dy)
 
+        will_eat = (new_head == self.food)
+        body_to_check = self.snake if will_eat else self.snake[:-1]
+
         if (
-            new_head in self.snake or
+            new_head in body_to_check or
             new_head in self.obstacles or
             new_head[0] < 0 or new_head[0] >= GRID_WIDTH or
             new_head[1] < 0 or new_head[1] >= GRID_HEIGHT

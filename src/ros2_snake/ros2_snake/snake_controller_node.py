@@ -112,34 +112,54 @@ class SnakeController(Node):
                     q.append(nxt)
 
         return False
+    def simulate_path(self, snake, path, food):
+        sim_snake = list(snake)
 
+        for step in path:
+            sim_snake.insert(0, step)
+
+            if step != food:
+                sim_snake.pop()
+
+        return sim_snake
     def decide_move(self, snake, food, obstacles):
         head = snake[0]
 
         blocked = set(obstacles) | set(snake[:-1])
 
-        # 1️⃣ Try SAFE path to food
+        # Try SAFE path to food (FULL simulation)
         path = self.astar(head, food, blocked)
         if path:
-            next_pos = path[0]
+            sim_snake = self.simulate_path(snake, path, food)
 
-            # simulate snake after eating food
-            sim_snake = [next_pos] + snake[:-1]
-
-            # tail must still be reachable
             if self.can_reach_tail(sim_snake, obstacles):
-                return self.move_from_positions(head, next_pos)
+                return self.move_from_positions(head, path[0])
 
-        # 2️⃣ Try path to tail (stall safely)
+        # Try path to tail (stall safely)
         tail = snake[-1]
         path = self.astar(head, tail, blocked - {tail})
         if path:
             return self.move_from_positions(head, path[0])
 
-        # 3️⃣ Hamiltonian fallback (guaranteed safe)
-        head_i = self.index[head]
-        next_pos = self.cycle[(head_i + 1) % self.cycle_len]
-        return self.move_from_positions(head, next_pos)
+        # Fallback: choose any safe move toward food
+        best_move = None
+        best_dist = float('inf')
+
+        for name, (dx, dy) in self.moves.items():
+            nx, ny = head[0] + dx, head[1] + dy
+            nxt = (nx, ny)
+
+            if (
+                0 <= nx < GRID_WIDTH and
+                0 <= ny < GRID_HEIGHT and
+                nxt not in blocked
+            ):
+                dist = abs(nx - food[0]) + abs(ny - food[1])
+                if dist < best_dist:
+                    best_dist = dist
+                    best_move = name
+
+        return best_move
 
     def astar(self, start, goal, blocked):
         from heapq import heappush, heappop
